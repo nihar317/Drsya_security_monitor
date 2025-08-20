@@ -1,0 +1,14 @@
+# Safe processes that won't be flagged
+systemd
+kernel
+init
+bash
+python
+python3
+firefox
+chrome
+chromium
+code
+vim
+nano
+gnome-shell

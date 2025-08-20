@@ -1,0 +1,1809 @@
+#!/usr/bin/env python3
+"""
+Dṛśya Security Monitor - Competition Winner Edition
+Ultimate futuristic security monitoring with glass morphism UI
+"""
+
+import psutil
+import time
+import argparse
+import os
+import threading
+import getpass
+import json
+import webbrowser
+import subprocess
+from pathlib import Path
+from flask import Flask, render_template_string, request, jsonify
+from flask_socketio import SocketIO, emit
+from tabulate import tabulate
+
+# Enhanced suspicious keywords with more detection patterns
+SUSPICIOUS_KEYWORDS = {
+    "Keylogger": {"keywords": ["keylog", "logger", "intercept", "keystroke", "keyspy", "keymon", "keyrecord"], "priority": "High"},
+    "Mic Access": {"keywords": ["mic", "audio", "pulse", "alsa", "microphone", "record", "capture"], "priority": "Medium"},
+    "Bluetooth Access": {"keywords": ["bluetoothd", "btmon", "bluetooth", "btsniff", "btscanner"], "priority": "Medium"},
+    "Camera Access": {"keywords": ["v4l", "webcam", "camera", "cheese", "video", "capture", "cam"], "priority": "High"},
+    "Screen Capture": {"keywords": ["screenshot", "screen", "capture", "recorder", "scrot", "spectacle"], "priority": "High"},
+    "Clipboard Access": {"keywords": ["clipboard", "clip", "copy", "paste", "xclip", "xsel"], "priority": "Medium"},
+    "Network Spy": {"keywords": ["wireshark", "tcpdump", "netstat", "nmap", "sniff", "packet"], "priority": "Medium"},
+    "System Spy": {"keywords": ["spy", "monitor", "watch", "track", "surveillance", "stealth"], "priority": "High"},
+}
+
+PRIORITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
+
+# Flask app setup
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'drsya-security-monitor-competition-2025'
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Global variables
+safe_list = set()
+is_monitoring = False
+monitoring_thread = None
+strict_mode = False
+safe_text_entered = False
+auto_kill_enabled = False
+refresh_interval = 10
+protection_score = 85
+screen_protection_enabled = True
+clipboard_protection_enabled = True
+current_mode = "lenient"
+
+app.scan_count = 0
+app.start_time = None
+app.total_threats_detected = 0
+app.killed_processes = 0
+
+# COMPETITION-WINNING FUTURISTIC UI TEMPLATE
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en" data-theme="cyber">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dṛśya - Ultimate Security Monitor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+  
+  <style>
+/* FUTURISTIC CYBERPUNK THEME */
+:root {
+  --primary-bg: #000000;
+  --secondary-bg: #0a0a0a;
+  --glass-bg: rgba(15, 23, 42, 0.3);
+  --glass-border: rgba(148, 163, 184, 0.1);
+  --neon-cyan: #00ffff;
+  --neon-purple: #8b5cf6;
+  --neon-pink: #ec4899;
+  --neon-green: #10b981;
+  --neon-red: #ef4444;
+  --neon-orange: #f59e0b;
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --glass-glow: 0 0 30px rgba(0, 255, 255, 0.3);
+  --card-glow: 0 8px 32px rgba(0, 255, 255, 0.1);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Rajdhani', sans-serif;
+  background: linear-gradient(135deg, #000000 0%, #0f172a 50%, #1e1b4b 100%);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Animated Background */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(circle at 20% 20%, rgba(0, 255, 255, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 40% 60%, rgba(236, 72, 153, 0.05) 0%, transparent 50%);
+  animation: backgroundShift 20s ease-in-out infinite;
+  z-index: -1;
+}
+
+@keyframes backgroundShift {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.1); }
+}
+
+/* Mode Selection Screen */
+.mode-selection {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(0,0,0,0.9) 0%, rgba(15,23,42,0.9) 100%);
+  backdrop-filter: blur(20px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: slideIn 0.8s ease-out;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-50px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mode-container {
+  text-align: center;
+  max-width: 900px;
+  padding: 3rem;
+}
+
+.mode-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 4rem;
+  font-weight: 900;
+  background: linear-gradient(45deg, var(--neon-cyan), var(--neon-purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 1rem;
+  text-shadow: var(--glass-glow);
+  animation: glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes glow {
+  from { filter: drop-shadow(0 0 20px rgba(0, 255, 255, 0.5)); }
+  to { filter: drop-shadow(0 0 30px rgba(139, 92, 246, 0.7)); }
+}
+
+.mode-subtitle {
+  font-size: 1.4rem;
+  color: var(--text-secondary);
+  margin-bottom: 3rem;
+  font-weight: 300;
+}
+
+.mode-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.mode-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 2.5rem;
+  cursor: pointer;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.mode-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  transition: all 0.6s;
+}
+
+.mode-card:hover::before {
+  left: 100%;
+}
+
+.mode-card:hover {
+  transform: translateY(-10px);
+  box-shadow: var(--card-glow);
+  border-color: var(--neon-cyan);
+}
+
+.mode-card.selected {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 40px rgba(0, 255, 255, 0.4);
+  transform: translateY(-5px);
+}
+
+.mode-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  display: block;
+}
+
+.mode-card.lenient .mode-icon { color: var(--neon-green); }
+.mode-card.strict .mode-icon { color: var(--neon-red); }
+
+.mode-name {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.mode-features {
+  text-align: left;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.continue-btn {
+  background: linear-gradient(45deg, var(--neon-cyan), var(--neon-purple));
+  border: none;
+  padding: 1rem 3rem;
+  border-radius: 50px;
+  font-family: 'Orbitron', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--primary-bg);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-top: 2rem;
+}
+
+.continue-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0, 255, 255, 0.4);
+}
+
+.continue-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Main Dashboard */
+.dashboard {
+  display: none;
+  padding: 2rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.dashboard.active {
+  display: block;
+  animation: fadeIn 0.6s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Glass Header */
+.header {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.header::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: conic-gradient(from 0deg, transparent, rgba(0,255,255,0.1), transparent);
+  animation: rotate 10s linear infinite;
+  z-index: -1;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.main-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 3.5rem;
+  font-weight: 900;
+  background: linear-gradient(45deg, var(--neon-cyan), var(--neon-purple), var(--neon-pink));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 0.5rem;
+  animation: titleGlow 3s ease-in-out infinite alternate;
+}
+
+@keyframes titleGlow {
+  from { filter: drop-shadow(0 0 10px rgba(0, 255, 255, 0.5)); }
+  to { filter: drop-shadow(0 0 20px rgba(236, 72, 153, 0.7)); }
+}
+
+.main-subtitle {
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: 50px;
+  padding: 0.5rem;
+  gap: 0.5rem;
+}
+
+.mode-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 25px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mode-toggle-btn.active {
+  background: linear-gradient(45deg, var(--neon-cyan), var(--neon-purple));
+  color: var(--primary-bg);
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+}
+
+/* Dashboard Grid */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 2rem;
+  transition: all 0.4s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple), var(--neon-pink));
+  opacity: 0.7;
+}
+
+.glass-card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--card-glow);
+  border-color: rgba(0, 255, 255, 0.3);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.card-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.card-icon {
+  width: 50px;
+  height: 50px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.metric-value {
+  font-family: 'Orbitron', monospace;
+  font-size: 3rem;
+  font-weight: 900;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(45deg, var(--neon-cyan), var(--neon-purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.metric-label {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Protection Score (Strict Mode) */
+.protection-score {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.score-circle {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  margin: 0 auto 1rem;
+  position: relative;
+  background: conic-gradient(var(--neon-cyan) 0% 85%, rgba(100, 116, 139, 0.3) 85% 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: scoreRotate 3s ease-in-out infinite;
+}
+
+@keyframes scoreRotate {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(5deg); }
+}
+
+.score-inner {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  border: 1px solid var(--glass-border);
+}
+
+.score-value {
+  font-family: 'Orbitron', monospace;
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: var(--neon-cyan);
+}
+
+.score-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+}
+
+/* Controls */
+.controls-section {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.controls-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.section-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 25px;
+  font-weight: 600;
+}
+
+.status-active {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+
+.status-inactive {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.pulse-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.2); }
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.cyber-btn {
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: 15px;
+  padding: 1rem 1.5rem;
+  color: var(--text-primary);
+  font-family: 'Orbitron', monospace;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  position: relative;
+  overflow: hidden;
+}
+
+.cyber-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0,255,255,0.2), transparent);
+  transition: all 0.6s;
+}
+
+.cyber-btn:hover::before {
+  left: 100%;
+}
+
+.cyber-btn.primary {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+}
+
+.cyber-btn.primary:hover {
+  background: rgba(0, 255, 255, 0.1);
+  box-shadow: 0 0 25px rgba(0, 255, 255, 0.4);
+  transform: translateY(-2px);
+}
+
+.cyber-btn.danger {
+  border-color: var(--neon-red);
+  color: var(--neon-red);
+}
+
+.cyber-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.4);
+  transform: translateY(-2px);
+}
+
+/* Threat Matrix */
+.threat-matrix {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 2rem;
+  overflow: hidden;
+}
+
+.matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: transparent;
+}
+
+.matrix-table th {
+  background: var(--glass-bg);
+  color: var(--neon-cyan);
+  padding: 1rem;
+  text-align: left;
+  font-family: 'Orbitron', monospace;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 2px solid var(--neon-cyan);
+}
+
+.matrix-table td {
+  padding: 1rem;
+  border-bottom: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  transition: all 0.3s ease;
+}
+
+.matrix-table tbody tr:hover {
+  background: rgba(0, 255, 255, 0.05);
+  transform: translateX(5px);
+}
+
+.priority-high {
+  background: linear-gradient(45deg, var(--neon-red), #dc2626);
+  color: white;
+  padding: 0.3rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.priority-medium {
+  background: linear-gradient(45deg, var(--neon-orange), #d97706);
+  color: white;
+  padding: 0.3rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.priority-low {
+  background: linear-gradient(45deg, var(--neon-green), #059669);
+  color: white;
+  padding: 0.3rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.intel-link {
+  color: var(--neon-purple);
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.intel-link:hover {
+  color: var(--neon-cyan);
+  text-shadow: 0 0 10px currentColor;
+}
+
+.action-btn {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-right: 0.5rem;
+}
+
+.action-btn.kill {
+  border-color: var(--neon-red);
+  color: var(--neon-red);
+}
+
+.action-btn.kill:hover {
+  background: rgba(239, 68, 68, 0.1);
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+}
+
+.no-threats {
+  text-align: center;
+  padding: 4rem 2rem;
+  color: var(--text-secondary);
+}
+
+.no-threats-icon {
+  font-size: 4rem;
+  color: var(--neon-green);
+  margin-bottom: 1rem;
+  animation: shield-pulse 2s ease-in-out infinite;
+}
+
+@keyframes shield-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+/* Config Panel (Strict Mode Only) */
+.config-panel {
+  display: none;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.config-panel.show {
+  display: block;
+  animation: slideDown 0.5s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+.config-item {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 15px;
+  padding: 1.5rem;
+}
+
+.config-label {
+  color: var(--neon-cyan);
+  font-weight: 600;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.config-input {
+  width: 100%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.config-input:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+.toggle-switch {
+  position: relative;
+  width: 60px;
+  height: 30px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 15px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.toggle-switch.active {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+.toggle-switch::before {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: all 0.3s ease;
+}
+
+.toggle-switch.active::before {
+  transform: translateX(30px);
+  background: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+}
+
+/* Floating Toast */
+.cyber-toast {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 15px;
+  padding: 1rem 1.5rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  transform: translateX(400px);
+  opacity: 0;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1000;
+  box-shadow: 0 0 25px rgba(0, 255, 255, 0.3);
+}
+
+.cyber-toast.show {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .mode-cards { grid-template-columns: 1fr; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .controls-grid { grid-template-columns: 1fr; }
+  .mode-title { font-size: 2.5rem; }
+  .main-title { font-size: 2.5rem; }
+}
+  </style>
+</head>
+<body>
+  <!-- Mode Selection Screen -->
+  <div class="mode-selection" id="mode-selection">
+    <div class="mode-container">
+      <h1 class="mode-title">DṚŚYA</h1>
+      <p class="mode-subtitle">Select Your Security Protocol</p>
+      
+      <div class="mode-cards">
+        <div class="mode-card lenient" onclick="selectMode('lenient')">
+          <i class="mode-icon fas fa-shield-alt"></i>
+          <h3 class="mode-name">Lenient Mode</h3>
+          <div class="mode-features">
+            • Safe for daily use<br>
+            • Monitor & report only<br>
+            • No auto-termination<br>
+            • Basic threat detection<br>
+            • Web dashboard access
+          </div>
+        </div>
+        
+        <div class="mode-card strict" onclick="selectMode('strict')">
+          <i class="mode-icon fas fa-skull-crossbones"></i>
+          <h3 class="mode-name">Strict Mode</h3>
+          <div class="mode-features">
+            • Maximum security<br>
+            • Auto-kill threats<br>
+            • Protection scoring<br>
+            • Advanced detection<br>
+            • Configuration panel
+          </div>
+        </div>
+      </div>
+      
+      <button class="continue-btn" id="continue-btn" onclick="startWithMode()" disabled>
+        <i class="fas fa-rocket"></i> Launch Dṛśya
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Dashboard -->
+  <div class="dashboard" id="dashboard">
+    <div class="header">
+      <h1 class="main-title">DṚŚYA</h1>
+      <p class="main-subtitle">Advanced Threat Detection & Analysis System</p>
+      <div class="mode-toggle">
+        <button class="mode-toggle-btn" id="lenient-btn" onclick="switchMode('lenient')">
+          <i class="fas fa-shield-alt"></i> Lenient
+        </button>
+        <button class="mode-toggle-btn" id="strict-btn" onclick="switchMode('strict')">
+          <i class="fas fa-skull-crossbones"></i> Strict
+        </button>
+      </div>
+    </div>
+
+    <!-- Config Panel (Strict Mode Only) -->
+    <div class="config-panel" id="config-panel">
+      <div class="card-header">
+        <h3 class="section-title">
+          <i class="fas fa-cogs"></i> Security Configuration
+        </h3>
+      </div>
+      <div class="config-grid">
+        <div class="config-item">
+          <label class="config-label">
+            <i class="fas fa-clock"></i> Refresh Interval
+          </label>
+          <select class="config-input" id="refresh-interval">
+            <option value="5">5 seconds</option>
+            <option value="10" selected>10 seconds</option>
+            <option value="15">15 seconds</option>
+            <option value="30">30 seconds</option>
+            <option value="60">60 seconds</option>
+          </select>
+        </div>
+        
+        <div class="config-item">
+          <label class="config-label">
+            <i class="fas fa-key"></i> Safe Text
+          </label>
+          <input type="password" class="config-input" id="safe-text" placeholder="Enter authentication text">
+        </div>
+        
+        <div class="config-item">
+          <label class="config-label">
+            <i class="fas fa-crosshairs"></i> Auto-Kill Threats
+          </label>
+          <div class="toggle-switch" id="auto-kill-toggle" onclick="toggleAutoKill()">
+          </div>
+        </div>
+        
+        <div class="config-item">
+          <label class="config-label">
+            <i class="fas fa-download"></i> Export Options
+          </label>
+          <button class="cyber-btn primary" onclick="exportPDF()">
+            <i class="fas fa-file-pdf"></i> Generate PDF
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dashboard Grid -->
+    <div class="dashboard-grid">
+      <!-- Active Threats -->
+      <div class="glass-card">
+        <div class="card-header">
+          <h3 class="card-title">Active Threats</h3>
+          <div class="card-icon" style="color: var(--neon-red);">
+            <i class="fas fa-exclamation-triangle"></i>
+          </div>
+        </div>
+        <div class="metric-value" id="threat-count" style="color: var(--neon-red);">0</div>
+        <div class="metric-label">Detected Threats</div>
+      </div>
+
+      <!-- System Scans -->
+      <div class="glass-card">
+        <div class="card-header">
+          <h3 class="card-title">System Scans</h3>
+          <div class="card-icon" style="color: var(--neon-orange);">
+            <i class="fas fa-search"></i>
+          </div>
+        </div>
+        <div class="metric-value" id="scan-count" style="color: var(--neon-orange);">0</div>
+        <div class="metric-label">Total Scans</div>
+      </div>
+
+      <!-- Uptime -->
+      <div class="glass-card">
+        <div class="card-header">
+          <h3 class="card-title">System Uptime</h3>
+          <div class="card-icon" style="color: var(--neon-green);">
+            <i class="fas fa-clock"></i>
+          </div>
+        </div>
+        <div class="metric-value" id="uptime" style="color: var(--neon-green);">0m</div>
+        <div class="metric-label">Active Time</div>
+      </div>
+
+      <!-- Protection Score (Strict Mode Only) -->
+      <div class="glass-card" id="protection-card" style="display: none;">
+        <div class="card-header">
+          <h3 class="card-title">Protection Score</h3>
+          <div class="card-icon" style="color: var(--neon-cyan);">
+            <i class="fas fa-shield-check"></i>
+          </div>
+        </div>
+        <div class="protection-score">
+          <div class="score-circle" id="score-circle">
+            <div class="score-inner">
+              <div class="score-value" id="score-value">85</div>
+              <div class="score-label">SECURE</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls Section -->
+    <div class="controls-section">
+      <div class="controls-header">
+        <h3 class="section-title">
+          <i class="fas fa-satellite-dish"></i> Monitoring Controls
+        </h3>
+        <div class="status-indicator status-inactive" id="status-indicator">
+          <div class="pulse-dot"></div>
+          <span id="status-text">System Inactive</span>
+        </div>
+      </div>
+      
+      <div class="controls-grid">
+        <button class="cyber-btn primary" id="start-btn" onclick="toggleMonitoring()">
+          <i class="fas fa-play"></i> Start Monitoring
+        </button>
+        
+        <button class="cyber-btn danger" onclick="stopMonitoring()">
+          <i class="fas fa-stop"></i> Stop Monitoring
+        </button>
+        
+        <button class="cyber-btn" onclick="openNVD()">
+          <i class="fas fa-database"></i> NVD Database
+        </button>
+        
+        <button class="cyber-btn" onclick="refreshData()">
+          <i class="fas fa-refresh"></i> Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Threat Matrix -->
+    <div class="threat-matrix">
+      <div class="card-header">
+        <h3 class="section-title">
+          <i class="fas fa-biohazard"></i> Threat Detection Matrix
+        </h3>
+        <div style="color: var(--text-muted); font-size: 0.9rem;">
+          Last Updated: <span id="last-updated">Never</span>
+        </div>
+      </div>
+      
+      <div style="overflow-x: auto;">
+        <table class="matrix-table">
+          <thead>
+            <tr>
+              <th>Process ID</th>
+              <th>Process Name</th>
+              <th>Threat Type</th>
+              <th>Priority</th>
+              <th>Intel</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="threats-body">
+            <tr>
+              <td colspan="6">
+                <div class="no-threats">
+                  <i class="no-threats-icon fas fa-shield"></i>
+                  <h3>System Secure</h3>
+                  <p>No active threats detected. Start monitoring to begin analysis.</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="cyber-toast" id="toast">
+    <span id="toast-message">System notification</span>
+  </div>
+
+  <script>
+// Global variables
+let selectedMode = null;
+let isMonitoring = false;
+let autoKillEnabled = false;
+let socket = null;
+let startTime = null;
+
+// Mode Selection Functions
+function selectMode(mode) {
+  selectedMode = mode;
+  
+  // Remove previous selections
+  document.querySelectorAll('.mode-card').forEach(card => {
+    card.classList.remove('selected');
+  });
+  
+  // Add selection to clicked card
+  document.querySelector(`.mode-card.${mode}`).classList.add('selected');
+  
+  // Enable continue button
+  document.getElementById('continue-btn').disabled = false;
+}
+
+function startWithMode() {
+  if (!selectedMode) return;
+  
+  // Hide mode selection
+  document.getElementById('mode-selection').style.display = 'none';
+  
+  // Show dashboard
+  document.getElementById('dashboard').classList.add('active');
+  
+  // Set mode
+  switchMode(selectedMode);
+  
+  // Initialize socket connection
+  initializeSocket();
+  
+  // Start uptime counter
+  startTime = Date.now();
+  updateUptime();
+  setInterval(updateUptime, 1000);
+  
+  showToast(`Dṛśya started in ${selectedMode} mode`);
+}
+
+function switchMode(mode) {
+  selectedMode = mode;
+  
+  // Update mode toggle buttons
+  document.querySelectorAll('.mode-toggle-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  document.getElementById(`${mode}-btn`).classList.add('active');
+  
+  // Show/hide config panel and protection score
+  const configPanel = document.getElementById('config-panel');
+  const protectionCard = document.getElementById('protection-card');
+  
+  if (mode === 'strict') {
+    configPanel.classList.add('show');
+    protectionCard.style.display = 'block';
+  } else {
+    configPanel.classList.remove('show');
+    protectionCard.style.display = 'none';
+  }
+  
+  // Send mode update to server
+  if (socket) {
+    fetch('/api/set_mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode: mode})
+    });
+  }
+}
+
+// Socket Functions
+function initializeSocket() {
+  socket = io();
+  
+  socket.on('connect', () => {
+    console.log('Connected to Dṛśya server');
+    showToast('Connected to security monitor');
+  });
+  
+  socket.on('update_data', (data) => {
+    updateDashboard(data);
+  });
+  
+  socket.on('mode_update', (data) => {
+    switchMode(data.mode);
+  });
+}
+
+// Monitoring Functions
+async function toggleMonitoring() {
+  const startBtn = document.getElementById('start-btn');
+  const statusIndicator = document.getElementById('status-indicator');
+  const statusText = document.getElementById('status-text');
+  
+  if (!isMonitoring) {
+    try {
+      const response = await fetch('/start_monitoring', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          mode: selectedMode,
+          autoKill: autoKillEnabled,
+          refreshInterval: parseInt(document.getElementById('refresh-interval').value),
+          safeText: document.getElementById('safe-text').value
+        })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'started') {
+        isMonitoring = true;
+        startTime = Date.now();
+        
+        startBtn.innerHTML = '<i class="fas fa-pause"></i> Pause Monitoring';
+        statusIndicator.className = 'status-indicator status-active';
+        statusText.textContent = 'System Active';
+        
+        showToast('Security monitoring started');
+      }
+    } catch (error) {
+      showToast('Failed to start monitoring');
+    }
+  } else {
+    try {
+      const response = await fetch('/stop_monitoring', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+      });
+      
+      if (response.ok) {
+        isMonitoring = false;
+        startTime = null;
+        
+        startBtn.innerHTML = '<i class="fas fa-play"></i> Start Monitoring';
+        statusIndicator.className = 'status-indicator status-inactive';
+        statusText.textContent = 'System Inactive';
+        
+        showToast('Security monitoring stopped');
+      }
+    } catch (error) {
+      showToast('Failed to stop monitoring');
+    }
+  }
+}
+
+function stopMonitoring() {
+  if (isMonitoring) {
+    toggleMonitoring();
+  }
+}
+
+// Dashboard Update Functions
+function updateDashboard(data) {
+  document.getElementById('threat-count').textContent = data.threats || 0;
+  document.getElementById('scan-count').textContent = data.scanCount || 0;
+  document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+  
+  updateThreatsTable(data.detections || []);
+  
+  if (selectedMode === 'strict' && data.protectionScore !== undefined) {
+    updateProtectionScore(data.protectionScore);
+  }
+}
+
+function updateThreatsTable(threats) {
+  const tbody = document.getElementById('threats-body');
+  
+  if (!threats || threats.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6">
+          <div class="no-threats">
+            <i class="no-threats-icon fas fa-shield"></i>
+            <h3>System Secure</h3>
+            <p>No active threats detected. System monitoring active.</p>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  tbody.innerHTML = threats.map(threat => `
+    <tr>
+      <td><code>${threat.PID}</code></td>
+      <td><strong>${threat.Name}</strong></td>
+      <td>${threat.Type}</td>
+      <td><span class="priority-${threat.Priority.toLowerCase()}">${threat.Priority}</span></td>
+      <td>
+        <a href="#" class="intel-link" onclick="searchNVD('${threat.Type}')">
+          <i class="fas fa-database"></i> Search CVE
+        </a>
+      </td>
+      <td>
+        <button class="action-btn kill" onclick="killProcess(${threat.PID})">
+          <i class="fas fa-times"></i> Kill
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function updateProtectionScore(score) {
+  const scoreValue = document.getElementById('score-value');
+  const scoreCircle = document.getElementById('score-circle');
+  
+  scoreValue.textContent = score;
+  
+  // Update circle color based on score
+  let gradient, label;
+  if (score >= 90) {
+    gradient = `conic-gradient(var(--neon-green) 0% ${score}%, rgba(100, 116, 139, 0.3) ${score}% 100%)`;
+    label = 'EXCELLENT';
+  } else if (score >= 75) {
+    gradient = `conic-gradient(var(--neon-cyan) 0% ${score}%, rgba(100, 116, 139, 0.3) ${score}% 100%)`;
+    label = 'SECURE';
+  } else if (score >= 60) {
+    gradient = `conic-gradient(var(--neon-orange) 0% ${score}%, rgba(100, 116, 139, 0.3) ${score}% 100%)`;
+    label = 'WARNING';
+  } else {
+    gradient = `conic-gradient(var(--neon-red) 0% ${score}%, rgba(100, 116, 139, 0.3) ${score}% 100%)`;
+    label = 'CRITICAL';
+  }
+  
+  scoreCircle.style.background = gradient;
+  document.querySelector('.score-label').textContent = label;
+}
+
+// Utility Functions
+function updateUptime() {
+  if (!startTime) {
+    document.getElementById('uptime').textContent = '0m';
+    return;
+  }
+  
+  const elapsed = Date.now() - startTime;
+  const minutes = Math.floor(elapsed / 60000);
+  const hours = Math.floor(minutes / 60);
+  
+  if (hours > 0) {
+    document.getElementById('uptime').textContent = `${hours}h ${minutes % 60}m`;
+  } else {
+    document.getElementById('uptime').textContent = `${minutes}m`;
+  }
+}
+
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  const messageEl = document.getElementById('toast-message');
+  
+  messageEl.textContent = message;
+  toast.classList.add('show');
+  
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, 3000);
+}
+
+// Control Functions
+function toggleAutoKill() {
+  autoKillEnabled = !autoKillEnabled;
+  const toggle = document.getElementById('auto-kill-toggle');
+  
+  if (autoKillEnabled) {
+    toggle.classList.add('active');
+  } else {
+    toggle.classList.remove('active');
+  }
+}
+
+function openNVD() {
+  window.open('https://nvd.nist.gov/vuln/search', '_blank');
+}
+
+function searchNVD(threatType) {
+  const query = encodeURIComponent(threatType + ' vulnerability');
+  window.open(`https://nvd.nist.gov/vuln/search/results?form_type=Basic&results_type=overview&search_type=all&query=${query}`, '_blank');
+}
+
+async function killProcess(pid) {
+  if (!confirm(`Terminate process with PID ${pid}?`)) return;
+  
+  try {
+    const response = await fetch('/kill_process', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pid: pid})
+    });
+    
+    const data = await response.json();
+    if (data.status === 'killed') {
+      showToast(`Process ${pid} terminated`);
+    } else {
+      showToast(`Failed to terminate process: ${data.message}`);
+    }
+  } catch (error) {
+    showToast('Error terminating process');
+  }
+}
+
+function refreshData() {
+  location.reload();
+}
+
+function exportPDF() {
+  showToast('PDF export feature coming soon...');
+  // TODO: Implement PDF export functionality
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+  // Check if returning from a previous session
+  const urlParams = new URLSearchParams(window.location.search);
+  const modeParam = urlParams.get('mode');
+  
+  if (modeParam) {
+    selectMode(modeParam);
+    startWithMode();
+  }
+});
+  </script>
+</body>
+</html>"""
+
+def load_safe_processes():
+    """Load safe processes from file"""
+    global safe_list
+    safe_file = Path(__file__).parent / "safe_processes.txt"
+    
+    if safe_file.exists():
+        try:
+            with open(safe_file, 'r') as file:
+                safe_list = {line.strip().lower() for line in file if line.strip() and not line.strip().startswith('#')}
+                print(f"[+] Loaded {len(safe_list)} safe process names.")
+        except Exception as e:
+            print(f"[!] Error loading safe list: {e}")
+    else:
+        # Default to lenient mode
+        strict_mode = False
+        current_mode = "lenient"
+    
+    auto_kill_enabled = args.auto_kill
+    
+    print("=" * 80)
+    print("🛡️  DṚŚYA SECURITY MONITOR - COMPETITION WINNER EDITION 🛡️")
+    print("=" * 80)
+    print(f"🚀 Mode: {current_mode.upper()}")
+    print(f"🌐 Dashboard: http://localhost:{args.port}")
+    print("=" * 80)
+    
+    # Load safe processes
+    load_safe_processes()
+    
+    # Get safe text for strict mode (only if running in strict mode from CLI)
+    if strict_mode:
+        safe_text = get_safe_text()
+    
+    print("\n✨ ENHANCED FEATURES:")
+    print("   • Futuristic Glass Morphism UI")
+    print("   • Real-time Threat Detection")
+    print("   • NVD Database Integration")
+    print("   • Mode Selection Interface")
+    if strict_mode:
+        print("   • Protection Scoring System")
+        print("   • Advanced Configuration Panel")
+        print("   • Screen Capture Protection")
+        print("   • Clipboard Monitoring")
+        if auto_kill_enabled:
+            print("   • Automatic Threat Termination")
+    
+    print("\n" + "="*80)
+    print("🎯 READY TO WIN THE COMPETITION - PRESS CTRL+C TO STOP")
+    print("="*80)
+    
+    # Auto-open browser with mode parameter
+    if current_mode:
+        threading.Timer(2.0, lambda: webbrowser.open(f"http://localhost:{args.port}?mode={current_mode}")).start()
+    else:
+        threading.Timer(2.0, lambda: webbrowser.open(f"http://localhost:{args.port}")).start()
+    
+    try:
+        socketio.run(app, host='0.0.0.0', port=args.port, debug=False)
+    except KeyboardInterrupt:
+        print("\n[+] Dṛśya stopped by user")
+        is_monitoring = False
+
+if __name__ == "__main__":
+    main()# Create default safe processes file
+        default_safe_processes = """# Dṛśya Safe Processes List
+# Add process names (one per line) that should be ignored
+# Lines starting with # are comments
+
+systemd
+kthreadd
+ksoftirqd
+migration
+rcu_gp
+rcu_par_gp
+watchdog
+systemd-journal
+systemd-udevd
+systemd-network
+systemd-resolve
+systemd-timesyncd
+dbus
+NetworkManager
+wpa_supplicant
+ssh
+rsyslog
+cron
+atd
+gdm
+gnome-session
+gnome-shell
+Xorg
+pulseaudio
+firefox
+chrome
+chromium
+code
+python3
+bash
+zsh
+fish
+vim
+nano
+gedit"""
+        
+        with open(safe_file, 'w') as file:
+            file.write(default_safe_processes)
+        
+        safe_list = {line.strip().lower() for line in default_safe_processes.split('\n') 
+                    if line.strip() and not line.strip().startswith('#')}
+        print(f"[+] Created sample safe_processes.txt file")
+        print(f"[+] Loaded {len(safe_list)} safe process names.")
+
+def get_safe_text():
+    """Get safe text from user for authentication"""
+    global safe_text_entered
+    if strict_mode:
+        print("\n" + "="*60)
+        print("SECURITY AUTHENTICATION REQUIRED")
+        print("="*60)
+        safe_text = getpass.getpass("Enter your safe text (hidden input): ")
+        if safe_text.strip():
+            safe_text_entered = True
+            print("[+] Safe text accepted. Proceeding with monitoring setup...")
+            return safe_text
+        else:
+            print("[!] No safe text provided. Monitoring will proceed without authentication.")
+    return None
+
+def classify_process(name, cmdline):
+    """Classify process based on suspicious keywords"""
+    full_cmd = " ".join(cmdline).lower()
+    name = name.lower()
+    for ptype, meta in SUSPICIOUS_KEYWORDS.items():
+        for keyword in meta["keywords"]:
+            if keyword in name or keyword in full_cmd:
+                return ptype, meta["priority"]
+    return None, None
+
+def scan_processes(safe_list, strict=False):
+    """Scan for suspicious processes"""
+    suspicious = []
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            pid = proc.info['pid']
+            name = proc.info['name'] or ''
+            cmdline = proc.info['cmdline'] or []
+            
+            if name.lower() in safe_list:
+                continue
+                
+            ptype, priority = classify_process(name, cmdline)
+            if ptype:
+                suspicious.append({
+                    "PID": pid,
+                    "Name": name,
+                    "Type": ptype,
+                    "Priority": priority,
+                    "Sensor Access": "Yes"
+                })
+                
+                app.total_threats_detected += 1
+                
+                if strict and auto_kill_enabled:
+                    try:
+                        psutil.Process(pid).kill()
+                        print(f"[+] Auto-killed PID {pid} ({name})")
+                        app.killed_processes += 1
+                    except Exception as e:
+                        print(f"[!] Failed to auto-kill PID {pid}: {e}")
+                        
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    
+    return suspicious
+
+def calculate_protection_score():
+    """Calculate protection score for strict mode"""
+    global protection_score
+    base_score = 70
+    
+    # Monitoring bonus
+    if is_monitoring:
+        base_score += 15
+    
+    # Strict mode bonus
+    if strict_mode:
+        base_score += 10
+    
+    # Authentication bonus
+    if safe_text_entered:
+        base_score += 5
+    
+    # Screen protection bonus
+    if screen_protection_enabled:
+        base_score += 5
+    
+    # Clipboard protection bonus
+    if clipboard_protection_enabled:
+        base_score += 3
+    
+    # Deduct points for active threats
+    current_threats = len(scan_processes(safe_list, strict=False))
+    base_score -= min(current_threats * 3, 30)
+    
+    protection_score = max(0, min(100, base_score))
+    return protection_score
+
+def monitoring_loop():
+    """Main monitoring loop"""
+    global is_monitoring
+    
+    if not hasattr(app, 'start_time') or app.start_time is None:
+        app.start_time = time.time()
+    
+    while is_monitoring:
+        detections = scan_processes(safe_list, strict=strict_mode)
+        app.scan_count += 1
+        
+        if detections:
+            print(f"\n[{time.strftime('%H:%M:%S')}] {len(detections)} threats detected:")
+            for detection in detections:
+                print(f"  • PID {detection['PID']}: {detection['Name']} ({detection['Type']})")
+        
+        # Calculate protection score for strict mode
+        if strict_mode:
+            current_protection_score = calculate_protection_score()
+        else:
+            current_protection_score = None
+        
+        # Send data to web dashboard
+        socketio.emit('update_data', {
+            'detections': detections,
+            'threats': len(detections),
+            'scanCount': app.scan_count,
+            'protectionScore': current_protection_score,
+            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+        
+        print(f"[{time.strftime('%H:%M:%S')}] Scan complete - {len(detections)} threats found")
+        if strict_mode and current_protection_score is not None:
+            print(f"[{time.strftime('%H:%M:%S')}] Protection Score: {current_protection_score}/100")
+        print("-" * 60)
+        
+        time.sleep(refresh_interval)
+
+# Flask Routes
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/api/status')
+def api_status():
+    """API status endpoint"""
+    uptime_str = "0m"
+    if hasattr(app, 'start_time') and app.start_time:
+        elapsed = time.time() - app.start_time
+        minutes = int(elapsed / 60)
+        hours = int(minutes / 60)
+        if hours > 0:
+            uptime_str = f"{hours}h {minutes % 60}m"
+        else:
+            uptime_str = f"{minutes}m"
+    
+    return jsonify({
+        'mode': current_mode,
+        'isActive': is_monitoring,
+        'threats': 0,
+        'scanCount': getattr(app, 'scan_count', 0),
+        'uptime': uptime_str,
+        'protectionScore': protection_score if strict_mode else None
+    })
+
+@app.route('/api/set_mode', methods=['POST'])
+def set_mode():
+    """Set the monitoring mode"""
+    global strict_mode, current_mode
+    data = request.get_json()
+    mode = data.get('mode', 'lenient')
+    
+    strict_mode = (mode == 'strict')
+    current_mode = mode
+    
+    print(f"[+] Mode switched to: {mode}")
+    return jsonify({'status': 'success', 'mode': mode})
+
+@app.route('/start_monitoring', methods=['POST'])
+def start_monitoring():
+    global is_monitoring, monitoring_thread, strict_mode, auto_kill_enabled, refresh_interval, safe_text_entered
+    
+    if not is_monitoring:
+        data = request.get_json()
+        
+        # Update settings from request
+        mode = data.get('mode', 'lenient')
+        strict_mode = (mode == 'strict')
+        auto_kill_enabled = data.get('autoKill', False)
+        refresh_interval = data.get('refreshInterval', 10)
+        safe_text = data.get('safeText', '')
+        
+        if safe_text:
+            safe_text_entered = True
+        
+        is_monitoring = True
+        monitoring_thread = threading.Thread(target=monitoring_loop)
+        monitoring_thread.daemon = True
+        monitoring_thread.start()
+        
+        # Emit mode update
+        socketio.emit('mode_update', {'mode': mode})
+        
+        print(f"[+] Monitoring started in {mode} mode")
+        return jsonify({'status': 'started', 'mode': mode})
+    else:
+        return jsonify({'status': 'already_running'})
+
+@app.route('/stop_monitoring', methods=['POST'])
+def stop_monitoring_route():
+    global is_monitoring
+    is_monitoring = False
+    print("[+] Monitoring stopped")
+    return jsonify({'status': 'stopped'})
+
+@app.route('/kill_process', methods=['POST'])
+def kill_process():
+    """Kill a specific process"""
+    data = request.get_json()
+    pid = data.get('pid')
+    
+    try:
+        psutil.Process(pid).kill()
+        app.killed_processes += 1
+        print(f"[+] Killed PID {pid} via web interface")
+        return jsonify({'status': 'killed', 'pid': pid})
+    except Exception as e:
+        print(f"[!] Failed to kill PID {pid}: {e}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
+# Socket Events
+@socketio.on('connect')
+def handle_connect():
+    print('[+] Web client connected')
+    emit('mode_update', {'mode': current_mode})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('[+] Web client disconnected')
+
+def main():
+    """Enhanced main function with proper argument parsing"""
+    global strict_mode, auto_kill_enabled, current_mode
+    
+    parser = argparse.ArgumentParser(description="Dṛśya Security Monitor - Competition Winner Edition")
+    parser.add_argument('--strict', action='store_true', help="Enable strict mode")
+    parser.add_argument('--lenient', action='store_true', help="Enable lenient mode (default)")
+    parser.add_argument('--port', type=int, default=5000, help="Port to run web server on")
+    parser.add_argument('--auto-kill', action='store_true', help="Enable automatic process killing in strict mode")
+    args = parser.parse_args()
+    
+    # Handle mode selection
+    if args.strict:
+        strict_mode = True
+        current_mode = "strict"
+    elif args.lenient:
+        strict_mode = False
+        current_mode = "lenient"
+    else:

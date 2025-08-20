@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>DRŚYA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <!-- Glow background -->
+  <div class="aura"></div>
+
+  <header class="header">
+    <div class="brand">
+      <span class="live-dot"></span>
+      <span class="brand-text">DRŚYA</span>
+      <span id="mode-badge" class="mode-badge">—</span>
+    </div>
+    <div id="server-chip" class="chip chip-off" title="Server status">Stopped</div>
+  </header>
+
+  <section class="bar">
+    <div class="bar-title">Last Scanned</div>
+    <div id="last-scanned" class="bar-right">—</div>
+  </section>
+
+  <!-- Main card -->
+  <section class="card big" id="mode-card">
+    <div class="card-head">
+      <div class="card-title">Threats Details</div>
+      <button id="manageBtn" class="ghost">Manage…</button>
+    </div>
+
+    <div class="grid">
+      <!-- donut -->
+      <div class="ring-wrap">
+        <svg id="ring" viewBox="0 0 120 120" class="ring">
+          <defs>
+            <linearGradient id="gradHigh" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" />
+              <stop offset="100%" />
+            </linearGradient>
+          </defs>
+          <circle cx="60" cy="60" r="46" class="ring-bg"></circle>
+          <circle id="seg-high" cx="60" cy="60" r="46" class="seg seg-high"></circle>
+          <circle id="seg-med"  cx="60" cy="60" r="46" class="seg seg-med"></circle>
+          <circle id="seg-low"  cx="60" cy="60" r="46" class="seg seg-low"></circle>
+          <text id="total-text" x="60" y="66" text-anchor="middle" class="total">0</text>
+        </svg>
+      </div>
+
+      <!-- legend -->
+      <div class="legend">
+        <div class="chipline">
+          <span class="pill pill-high"></span>
+          <span class="lbl">High</span>
+          <span id="count-high" class="val">0</span>
+        </div>
+        <div class="chipline">
+          <span class="pill pill-med"></span>
+          <span class="lbl">Medium</span>
+          <span id="count-med" class="val">0</span>
+        </div>
+        <div class="chipline">
+          <span class="pill pill-low"></span>
+          <span class="lbl">Low</span>
+          <span id="count-low" class="val">0</span>
+        </div>
+
+        <!-- little stat chips to fill space -->
+        <div class="mini-metrics">
+          <div class="mini">
+            <div class="k">Uptime</div>
+            <div id="uptime-mini" class="v">—</div>
+          </div>
+          <div class="mini">
+            <div class="k">Status</div>
+            <div id="active-mini" class="v">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Strict-only strip -->
+  <section id="strict-strip" class="strip strip-hidden">
+    <div class="kill-icon">⛔</div>
+    <div><strong id="killed">0</strong> threats killed (strict)</div>
+  </section>
+
+  <!-- Bottom bar: quick toggles + actions -->
+  <footer class="footer">
+    <div class="toggles">
+      <label class="switch" title="Toggle visual theme">
+        <input id="themeToggle" type="checkbox"/>
+        <span class="slider">
+          <span>Dark</span><span>Light</span>
+        </span>
+      </label>
+
+      <label class="switch" title="Visual mode label (UI only)">
+        <input id="modeToggle" type="checkbox"/>
+        <span class="slider">
+          <span>Lenient</span><span>Strict</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button id="dashboardBtn" class="btn btn-primary">Dashboard</button>
+      <button id="refreshBtn" class="btn btn-ghost">Refresh</button>
+    </div>
+  </footer>
+
+  <!-- Slide-up Manage sheet (same controls + links) -->
+  <div id="panel" class="panel hidden" role="dialog" aria-modal="true" aria-labelledby="panel-title">
+    <div class="panel-card">
+      <div class="panel-head">
+        <div id="panel-title" class="panel-title">Quick Manage</div>
+        <button id="closePanel" class="icon-btn" aria-label="Close">✖</button>
+      </div>
+
+      <div class="panel-body">
+        <div class="toggle-row">
+          <div class="toggle-copy">
+            <div class="toggle-title">Mode (UI only)</div>
+            <div class="toggle-sub">Mirror backend label without changing behavior</div>
+          </div>
+          <label class="switch">
+            <input id="uiModeToggle" type="checkbox" />
+            <span class="slider">
+              <span>Lenient</span><span>Strict</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="toggle-row">
+          <div class="toggle-copy">
+            <div class="toggle-title">Theme</div>
+            <div class="toggle-sub">Light/Dark for popup</div>
+          </div>
+          <label class="switch">
+            <input id="uiThemeToggle" type="checkbox" />
+            <span class="slider">
+              <span>Dark</span><span>Light</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="panel-note">
+          Your dashboard still controls the actual monitoring mode and actions.
+        </div>
+      </div>
+
+      <div class="panel-footer">
+        <button id="gotoDash" class="btn btn-primary">Open Dashboard</button>
+        <button id="panelRefresh" class="btn btn-ghost">Refresh Now</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+
